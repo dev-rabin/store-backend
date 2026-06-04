@@ -7,6 +7,8 @@ use Illuminate\Http\Request;
 use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\Address;
+
 
 class CheckoutController extends Controller
 {
@@ -16,9 +18,11 @@ class CheckoutController extends Controller
 
         $request->validate([
             'address_id' => 'required|exists:addresses,id',
+            'product_id' => 'nullable|exists:products,id',
+            'quantity' => 'nullable|integer|min:1',
         ]);
 
-        $address = \App\Models\Address::where('id', $request->address_id)
+        $address = Address::where('id', $request->address_id)
             ->where('user_id', $user->id)
             ->first();
 
@@ -29,6 +33,62 @@ class CheckoutController extends Controller
             ], 404);
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | BUY NOW FLOW
+        |--------------------------------------------------------------------------
+        */
+        if ($request->filled('product_id')) {
+
+            $product = Product::find($request->product_id);
+
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Product not found'
+                ], 404);
+            }
+
+            $quantity = $request->quantity ?? 1;
+
+            $total = $product->price * $quantity;
+
+            $order = Order::create([
+                'user_id' => $user->id,
+                'address_id' => $address->id,
+                'total_amount' => $total,
+                'status' => 'pending',
+                'payment_status' => 'pending',
+            ]);
+
+            OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'quantity' => $quantity,
+                'price' => $product->price,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Order created successfully',
+                'order_id' => $order->id,
+                'redirect_url' => "/orders/{$order->id}",
+                'order' => [
+                    'id' => $order->id,
+                    'address_id' => $order->address_id,
+                    'total_amount' => $order->total_amount,
+                    'status' => $order->status,
+                    'payment_status' => $order->payment_status,
+                    'created_at' => $order->created_at,
+                ]
+            ], 201);
+        }
+
+        /*
+        |--------------------------------------------------------------------------
+        | CART CHECKOUT FLOW
+        |--------------------------------------------------------------------------
+        */
         $cartItems = Cart::with('product')
             ->where('user_id', $user->id)
             ->get();
@@ -49,7 +109,6 @@ class CheckoutController extends Controller
         $order = Order::create([
             'user_id' => $user->id,
             'address_id' => $address->id,
-
             'total_amount' => $total,
             'status' => 'pending',
             'payment_status' => 'pending',
@@ -64,13 +123,14 @@ class CheckoutController extends Controller
             ]);
         }
 
+        // Uncomment after successful payment implementation
         // Cart::where('user_id', $user->id)->delete();
 
         return response()->json([
             'success' => true,
+            'message' => 'Order created successfully',
             'order_id' => $order->id,
             'redirect_url' => "/orders/{$order->id}",
-            'message' => 'Order created successfully',
             'order' => [
                 'id' => $order->id,
                 'address_id' => $order->address_id,
@@ -81,7 +141,6 @@ class CheckoutController extends Controller
             ]
         ], 201);
     }
-
     public function getOrders(Request $request)
         {
             $orders = Order::where('user_id', $request->user()->id)
