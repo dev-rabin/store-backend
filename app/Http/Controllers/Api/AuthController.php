@@ -78,12 +78,13 @@ class AuthController extends Controller
                 'message' => 'Logged out successfully'
             ]);
         }
-
     public function profile(Request $request)
         {
+            $user = User::with('addresses')
+                ->find($request->user()->id);
             return response()->json([
                 'success' => true,
-                'user' => $request->user()
+                'user' => $user
             ]);
         }
-}
+    }
