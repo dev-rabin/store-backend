@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Address;
 use Illuminate\Http\Request;
+use App\Models\Product;
 
 class AddressController extends Controller
 {
@@ -121,4 +122,29 @@ class AddressController extends Controller
             'message' => 'Address deleted successfully'
         ]);
     }
+
+    public function setDefault($id)
+        {
+            $user = auth()->user();
+
+            Address::where('user_id', $user->id)
+                ->update([
+                    'is_default' => false
+                ]);
+
+            $address = Address::where('user_id', $user->id)
+                ->where('id', $id)
+                ->firstOrFail();
+
+            $address->update([
+                'is_default' => true
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Default address updated',
+                'address' => $address
+            ]);
+        }
+
 }
