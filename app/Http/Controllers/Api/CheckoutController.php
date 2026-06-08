@@ -4,176 +4,98 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Address;
 use App\Models\Product;
-
 
 class CheckoutController extends Controller
 {
     public function placeOrder(Request $request)
     {
-        $user = $request->user();
+        $validated = $request->validate([
+            'customer_name' => 'required|string|max:255',
+            'customer_email' => 'required|email|max:255',
+            'customer_phone' => 'required|string|max:20',
 
-        $request->validate([
-            'address_id' => 'required|exists:addresses,id',
-            'product_id' => 'nullable|exists:products,id',
-            'quantity' => 'nullable|integer|min:1',
+            'shipping_address' => 'required|string',
+            'city' => 'required|string|max:100',
+            'state' => 'required|string|max:100',
+            'pincode' => 'required|string|max:20',
+
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => 'required|integer|min:1',
         ]);
 
-        $address = Address::where('id', $request->address_id)
-            ->where('user_id', $user->id)
-            ->first();
+        $totalAmount = 0;
 
-        if (!$address) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Address not found'
-            ], 404);
-        }
+        foreach ($validated['items'] as $item) {
+            $product = Product::find($item['product_id']);
 
-        /*
-        |--------------------------------------------------------------------------
-        | BUY NOW FLOW
-        |--------------------------------------------------------------------------
-        */
-        if ($request->filled('product_id')) {
-
-            $product = Product::find($request->product_id);
-
-            if (!$product) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Product not found'
-                ], 404);
-            }
-
-            $quantity = $request->quantity ?? 1;
-
-            $total = $product->price * $quantity;
-
-            $order = Order::create([
-                'user_id' => $user->id,
-                'address_id' => $address->id,
-                'total_amount' => $total,
-                'status' => 'pending',
-                'payment_status' => 'pending',
-            ]);
-
-            OrderItem::create([
-                'order_id' => $order->id,
-                'product_id' => $product->id,
-                'quantity' => $quantity,
-                'price' => $product->price,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Order created successfully',
-                'order_id' => $order->id,
-                'redirect_url' => "/orders/{$order->id}",
-                'order' => [
-                    'id' => $order->id,
-                    'address_id' => $order->address_id,
-                    'total_amount' => $order->total_amount,
-                    'status' => $order->status,
-                    'payment_status' => $order->payment_status,
-                    'created_at' => $order->created_at,
-                ]
-            ], 201);
-        }
-
-        /*
-        |--------------------------------------------------------------------------
-        | CART CHECKOUT FLOW
-        |--------------------------------------------------------------------------
-        */
-        $cartItems = Cart::with('product')
-            ->where('user_id', $user->id)
-            ->get();
-
-        if ($cartItems->isEmpty()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Your cart is empty'
-            ], 400);
-        }
-
-        $total = 0;
-
-        foreach ($cartItems as $item) {
-            $total += $item->product->price * $item->quantity;
+            $totalAmount += $product->price * $item['quantity'];
         }
 
         $order = Order::create([
-            'user_id' => $user->id,
-            'address_id' => $address->id,
-            'total_amount' => $total,
+            'order_number' => 'MV' . time(),
+
+            'customer_name' => $validated['customer_name'],
+            'customer_email' => $validated['customer_email'],
+            'customer_phone' => $validated['customer_phone'],
+
+            'shipping_address' => $validated['shipping_address'],
+            'city' => $validated['city'],
+            'state' => $validated['state'],
+            'pincode' => $validated['pincode'],
+
+            'total_amount' => $totalAmount,
+
             'status' => 'pending',
             'payment_status' => 'pending',
         ]);
 
-        foreach ($cartItems as $item) {
+        foreach ($validated['items'] as $item) {
+
+            $product = Product::find($item['product_id']);
+
             OrderItem::create([
                 'order_id' => $order->id,
-                'product_id' => $item->product_id,
-                'quantity' => $item->quantity,
-                'price' => $item->product->price,
+                'product_id' => $product->id,
+                'quantity' => $item['quantity'],
+                'price' => $product->price,
             ]);
         }
-
-        // Uncomment after successful payment implementation
-        // Cart::where('user_id', $user->id)->delete();
 
         return response()->json([
             'success' => true,
             'message' => 'Order created successfully',
             'order_id' => $order->id,
-            'redirect_url' => "/orders/{$order->id}",
-            'order' => [
-                'id' => $order->id,
-                'address_id' => $order->address_id,
-                'total_amount' => $order->total_amount,
-                'status' => $order->status,
-                'payment_status' => $order->payment_status,
-                'created_at' => $order->created_at,
-            ]
+            'order_number' => $order->order_number,
+            'total_amount' => $order->total_amount,
         ], 201);
     }
-    public function getOrders(Request $request)
-        {
-            $orders = Order::where('user_id', $request->user()->id)
-                ->latest()
-                ->get();
 
-            return response()->json([
-                'success' => true,
-                'orders' => $orders
-            ]);
-        }
+    public function trackOrder(Request $request)
+    {
+        $request->validate([
+            'order_number' => 'required',
+            'phone' => 'required',
+        ]);
 
-        public function getOrder($id, Request $request)
-        {
-            $order = Order::with([
-                'address',
-                'items.product'
-            ])
-            ->where('user_id', $request->user()->id)
-            ->where('id', $id)
+        $order = Order::with('items.product')
+            ->where('order_number', $request->order_number)
+            ->where('customer_phone', $request->phone)
             ->first();
 
-            if (!$order) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Order not found'
-                ], 404);
-            }
-
+        if (!$order) {
             return response()->json([
-                'success' => true,
-                'order' => $order
-            ]);
+                'success' => false,
+                'message' => 'Order not found'
+            ], 404);
         }
+
+        return response()->json([
+            'success' => true,
+            'order' => $order
+        ]);
+    }
 }

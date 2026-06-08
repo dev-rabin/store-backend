@@ -14,7 +14,7 @@ class ProductController extends Controller
         $products = Product::query();
 
         if ($request->filled('search')) {
-            $products->where('name', 'ILIKE', '%' . $request->search . '%');
+            $products->where('name', 'LIKE', '%' . $request->search . '%');
         }
 
         if ($request->filled('category')) {

@@ -6,8 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use App\Models\Order;
-use App\Models\Cart;
-
 
 class PaymentController extends Controller
 {
@@ -17,11 +15,7 @@ class PaymentController extends Controller
             'order_id' => 'required|exists:orders,id',
         ]);
 
-        $user = $request->user();
-
-        $order = Order::where('id', $request->order_id)
-            ->where('user_id', $user->id)
-            ->first();
+        $order = Order::find($request->order_id);
 
         if (!$order) {
             return response()->json([
@@ -42,7 +36,9 @@ class PaymentController extends Controller
         $merchantId = env('A1XPAY_MERCHANT_ID');
 
         $amount = number_format($order->total_amount, 2, '.', '');
-        $merchantOrderId = 'ORD_' . $order->id;
+
+        $merchantOrderId = $order->order_number;
+
         $timestamp = (string) time();
 
         $canonical = "{$amount}|{$merchantOrderId}|{$timestamp}|{$merchantId}";
@@ -53,7 +49,7 @@ class PaymentController extends Controller
             $secretSalt
         );
 
-        // For Production
+        // For Local 
         // $response = Http::withHeaders([
         //     'X-Api-Key' => $apiKey,
         //     'X-Signature' => $signature,
@@ -65,18 +61,18 @@ class PaymentController extends Controller
         //     'webhook_url' => env('A1XPAY_WEBHOOK_URL'),
         // ]);
 
-        // For Local
+        // For Production 
         $response = Http::withoutVerifying()
-            ->withHeaders([
-                'X-Api-Key' => $apiKey,
-                'X-Signature' => $signature,
-                'X-Timestamp' => $timestamp,
-            ])
-            ->post('https://api.a1xpay.com/api/v1/create-order', [
-                'amount' => $amount,
-                'merchant_order_id' => $merchantOrderId,
-                'redirect_url' => env('A1XPAY_REDIRECT_URL'),
-                'webhook_url' => env('A1XPAY_WEBHOOK_URL'),
+        ->withHeaders([
+            'X-Api-Key' => $apiKey,
+            'X-Signature' => $signature,
+            'X-Timestamp' => $timestamp,
+        ])
+        ->post('https://api.a1xpay.com/api/v1/create-order', [
+            'amount' => $amount,
+            'merchant_order_id' => $merchantOrderId,
+            'redirect_url' => env('A1XPAY_REDIRECT_URL'),
+            'webhook_url' => env('A1XPAY_WEBHOOK_URL'),
         ]);
 
         if (!$response->successful()) {
@@ -102,62 +98,56 @@ class PaymentController extends Controller
         ]);
     }
 
-
     public function webhook(Request $request)
-{
-    $payload = $request->getContent();
+    {
+        $payload = $request->getContent();
 
-    $signature = $request->header('X-Signature');
-    $timestamp = $request->header('X-Timestamp');
+        $signature = $request->header('X-Signature');
+        $timestamp = $request->header('X-Timestamp');
 
-    $data = json_decode($payload, true);
+        $data = json_decode($payload, true);
 
-    $canonical =
-        $data['txn_id'] . '|' .
-        $data['status'] . '|' .
-        $data['amount'] . '|' .
-        $data['merchant_order_id'] . '|' .
-        $timestamp;
+        $canonical =
+            $data['txn_id'] . '|' .
+            $data['status'] . '|' .
+            $data['amount'] . '|' .
+            $data['merchant_order_id'] . '|' .
+            $timestamp;
 
-    $expected = hash_hmac(
-        'sha256',
-        $canonical,
-        env('A1XPAY_SECRET_SALT')
-    );
+        $expected = hash_hmac(
+            'sha256',
+            $canonical,
+            env('A1XPAY_SECRET_SALT')
+        );
 
-    // if (!hash_equals($expected, $signature)) {
-    //     return response()->json([
-    //         'message' => 'Invalid signature'
-    //     ], 401);
-    // }
+        // Enable after testing
+        // if (!hash_equals($expected, $signature)) {
+        //     return response()->json([
+        //         'message' => 'Invalid signature'
+        //     ], 401);
+        // }
 
-    if ($data['status'] === 'success') {
+        if (($data['status'] ?? '') === 'success') {
 
-        $merchantOrderId = $data['merchant_order_id'];
+            $order = Order::where(
+                'order_number',
+                $data['merchant_order_id']
+            )->first();
 
-        $orderId = str_replace('ORD_', '', $merchantOrderId);
+            if ($order && $order->payment_status !== 'paid') {
 
-        $order = Order::find($orderId);
-
-        if ($order && $order->payment_status !== 'paid') {
-
-            $order->update([
-                'payment_status' => 'paid',
-                'status' => 'processing',
-                'transaction_id' => $data['txn_id'],
-                'paid_at' => now(),
-                'payment_response' => $data,
-            ]);
-
-            Cart::where(
-                'user_id',
-                $order->user_id
-            )->delete();
+                $order->update([
+                    'payment_status' => 'paid',
+                    'status' => 'processing',
+                    'transaction_id' => $data['txn_id'],
+                    'paid_at' => now(),
+                    'payment_response' => $data,
+                ]);
+            }
         }
-    }
 
-    return response()->json([
-        'received' => true
-    ]);
-}
+        return response()->json([
+            'received' => true
+        ]);
+    }
 }
