@@ -49,31 +49,37 @@ class PaymentController extends Controller
             $secretSalt
         );
 
-        // For Local 
-        // $response = Http::withHeaders([
+        // For Local
+        // $response = Http::withoutVerifying()
+        // ->withHeaders([
         //     'X-Api-Key' => $apiKey,
         //     'X-Signature' => $signature,
         //     'X-Timestamp' => $timestamp,
-        // ])->post('https://api.a1xpay.com/api/v1/create-order', [
+        // ])
+        // ->post('https://api.a1xpay.com/api/v1/create-order', [
         //     'amount' => $amount,
         //     'merchant_order_id' => $merchantOrderId,
         //     'redirect_url' => env('A1XPAY_REDIRECT_URL'),
         //     'webhook_url' => env('A1XPAY_WEBHOOK_URL'),
         // ]);
-
-        // For Production 
-        $response = Http::withoutVerifying()
-        ->withHeaders([
+        
+        // For Production
+        $response = Http::withHeaders([
             'X-Api-Key' => $apiKey,
             'X-Signature' => $signature,
             'X-Timestamp' => $timestamp,
-        ])
-        ->post('https://api.a1xpay.com/api/v1/create-order', [
+        ])->post('https://api.a1xpay.com/api/v1/create-order', [
             'amount' => $amount,
             'merchant_order_id' => $merchantOrderId,
             'redirect_url' => env('A1XPAY_REDIRECT_URL'),
             'webhook_url' => env('A1XPAY_WEBHOOK_URL'),
         ]);
+        
+        \Log::info('A1XPAY CONFIG', [
+                'client_id' => env('A1XPAY_CLIENT_ID'),
+                'has_secret' => !empty(env('A1XPAY_CLIENT_SECRET')),
+            ]);
+
 
         if (!$response->successful()) {
             return response()->json([
@@ -105,6 +111,13 @@ class PaymentController extends Controller
         $signature = $request->header('X-Signature');
         $timestamp = $request->header('X-Timestamp');
 
+    \Log::info('PAYMENT WEBHOOK HIT');
+    \Log::info('WEBHOOK HEADERS', request()->headers->all());
+    \Log::info('WEBHOOK PAYLOAD', request()->all());
+    \Log::info('WEBHOOK RAW BODY', [
+        'body' => request()->getContent()
+    ]);
+
         $data = json_decode($payload, true);
 
         $canonical =
@@ -121,11 +134,11 @@ class PaymentController extends Controller
         );
 
         // Enable after testing
-        // if (!hash_equals($expected, $signature)) {
-        //     return response()->json([
-        //         'message' => 'Invalid signature'
-        //     ], 401);
-        // }
+        if (!hash_equals($expected, $signature)) {
+            return response()->json([
+                'message' => 'Invalid signature'
+            ], 401);
+        }
 
         if (($data['status'] ?? '') === 'success') {
 
