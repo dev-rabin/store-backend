@@ -22,6 +22,8 @@ Route::post('/payment/webhook', [PaymentController::class, 'webhook']);
 
 Route::get('/orders/track', [CheckoutController::class, 'trackOrder']);
 
+Route::get('/payment/order-details/{orderNumber}',[PaymentController::class, 'getOrderDetails']);
+
 // Route::post('/signup', [AuthController::class, 'signup']);
 // Route::post('/login', [AuthController::class, 'login']);
 // Route::post('/logout', [AuthController::class, 'logout'])
